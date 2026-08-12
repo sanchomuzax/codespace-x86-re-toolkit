@@ -15,6 +15,7 @@ import subprocess
 import sys
 
 
+__version__ = "0.1.0"
 DEFAULT_HOST_REPO = "sanchomuzax/codespace-x86-re-toolkit"
 DEFAULT_MACHINE = "basicLinux32gb"
 DEFAULT_LOCATION = "WestEurope"
@@ -404,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Authorized x86 reverse engineering in an isolated GitHub Codespace."
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     doctor_parser = commands.add_parser("doctor", help="Check auth and machine access")

@@ -45,6 +45,55 @@ copy:
 python3 scripts/codespace_re.py create --repo OWNER/REPOSITORY
 ```
 
+## Monitor long-running analysis
+
+When a run may outlive one agent tool call, start both the logged run and a
+separate bounded observer. Do not merely put the analysis in the background
+and forget it. Use a unique log, an explicit completion sentinel, a monitor
+deadline longer than the analysis deadline, and a short polling interval:
+
+```bash
+RUN_LOG=$(mktemp /tmp/codespace-x86-re-run.XXXXXX.log)
+MONITOR_LOG="${RUN_LOG%.log}.monitor.log"
+
+(
+  set +e
+  python3 scripts/codespace_re.py analyze \
+    --codespace "$NAME" --timeout 1800 >"$RUN_LOG" 2>&1
+  rc=$?
+  printf '\nCODESPACE_X86_RE_DONE rc=%s\n' "$rc" >>"$RUN_LOG"
+  exit "$rc"
+) &
+RUN_PID=$!
+
+(
+  deadline=$((SECONDS + 2100))
+  until grep -q '^CODESPACE_X86_RE_DONE rc=' "$RUN_LOG" 2>/dev/null; do
+    if (( SECONDS >= deadline )); then
+      printf 'MONITOR_TIMEOUT run_pid=%s log=%s\n' "$RUN_PID" "$RUN_LOG"
+      exit 124
+    fi
+    sleep 20
+  done
+  rc=$(sed -n 's/^CODESPACE_X86_RE_DONE rc=//p' "$RUN_LOG" | tail -n 1)
+  imports=$(grep -c 'REPORT: Import succeeded' "$RUN_LOG" || true)
+  printf 'DONE rc=%s successful_imports=%s log=%s\n' "$rc" "$imports" "$RUN_LOG"
+  tail -n 20 "$RUN_LOG"
+) >"$MONITOR_LOG" 2>&1 &
+MONITOR_PID=$!
+
+printf 'run_pid=%s monitor_pid=%s monitor_log=%s\n' \
+  "$RUN_PID" "$MONITOR_PID" "$MONITOR_LOG"
+```
+
+Continue independent work, but retain the printed PIDs and paths. Use the
+agent runtime's native wait/poll mechanism on the observer, or inspect
+`$MONITOR_LOG` at intervals; never start duplicate observers for the same run.
+When it finishes, read the summary, check the recorded `rc`, preserve evidence,
+and run exact-name Codespace cleanup. A monitor timeout is not proof that the
+analysis stopped: inspect the run PID and Codespace state before deciding what
+to do next.
+
 ## Run a GhidraScript
 
 Run Java GhidraScripts against the completed project:
