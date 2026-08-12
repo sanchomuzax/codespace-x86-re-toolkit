@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+.env.*
+*.log
+
+# Never commit target binaries, dumps, or Ghidra projects.
+*.exe
+*.dll
+*.sys
+*.so
+*.dylib
+*.bin
+*.dump
+*.dmp
+*.gpr
+*.rep/
+*.gar
+*.gzf
+analysis-output/
+research-artifacts/
+
+# Credentials and keys.
+*.pem
+*.key
+id_rsa*
+id_ed25519*

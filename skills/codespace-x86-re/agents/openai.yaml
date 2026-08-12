@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codespace x86 Reverse Engineering"
+  short_description: "Automate isolated x86 analysis with Ghidra"
+  default_prompt: "Use $codespace-x86-re to analyze an authorized x86 binary safely in an ephemeral GitHub Codespace."
