@@ -1,0 +1,126 @@
+name: Codespace integration smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_cost:
+        description: "Create a billable Codespace for this smoke test"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codespace-integration-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: ${{ inputs.confirm_cost }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOOL: skills/codespace-x86-re/scripts/codespace_re.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Require a dedicated Codespaces token
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: |
+          if test -z "${GH_TOKEN:-}"; then
+            echo "CODESPACES_PAT is missing; see README.md." >&2
+            exit 2
+          fi
+
+      - name: Check Codespaces access and cheapest machine
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: python3 "$TOOL" doctor --repo "$GITHUB_REPOSITORY" --machine basicLinux32gb
+
+      - name: Create bounded Codespace
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: |
+          name=$(python3 "$TOOL" create \
+            --repo "$GITHUB_REPOSITORY" \
+            --branch "$GITHUB_REF_NAME" \
+            --machine basicLinux32gb \
+            --idle-timeout 10m \
+            --retention-period 1h | tail -n 1)
+          test -n "$name"
+          printf 'CODESPACE_NAME=%s\n' "$name" >> "$GITHUB_ENV"
+
+      - name: Setup pinned Ghidra
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: python3 "$TOOL" setup --codespace "$CODESPACE_NAME"
+
+      - name: Prepare x86-64 sample
+        run: cp /bin/true "$RUNNER_TEMP/sample-x86-64"
+
+      - name: Upload sample with SHA verification
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: >-
+          python3 "$TOOL" upload
+          --codespace "$CODESPACE_NAME"
+          --binary "$RUNNER_TEMP/sample-x86-64"
+
+      - name: Analyze sample
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: python3 "$TOOL" analyze --codespace "$CODESPACE_NAME" --timeout 120
+
+      - name: Run isolated Java GhidraScript
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: >-
+          python3 "$TOOL" run-script
+          --codespace "$CODESPACE_NAME"
+          --script skills/codespace-x86-re/scripts/HelloScript.java
+
+      - name: Download evidence
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          python3 "$TOOL" download \
+            --codespace "$CODESPACE_NAME" \
+            --result analyze.log \
+            --output "$RUNNER_TEMP/evidence/analyze.log"
+          python3 "$TOOL" download \
+            --codespace "$CODESPACE_NAME" \
+            --result script-HelloScript.log \
+            --output "$RUNNER_TEMP/evidence/script-HelloScript.log"
+          grep -q "REPORT: Import succeeded" "$RUNNER_TEMP/evidence/analyze.log"
+          grep -q "CODESPACE_X86_RE_SCRIPT_OK" "$RUNNER_TEMP/evidence/script-HelloScript.log"
+
+      - name: Preserve smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: codespace-smoke-evidence
+          path: ${{ runner.temp }}/evidence/*.log
+          retention-days: 7
+
+      - name: Delete exact Codespace
+        if: ${{ always() && env.CODESPACE_NAME != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: python3 "$TOOL" delete --codespace "$CODESPACE_NAME"
+
+      - name: Confirm cleanup
+        if: ${{ always() && env.CODESPACE_NAME != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.CODESPACES_PAT }}
+        run: |
+          if gh codespace list --json name --jq '.[].name' | grep -Fxq "$CODESPACE_NAME"; then
+            echo "Codespace still exists after cleanup: $CODESPACE_NAME" >&2
+            exit 3
+          fi

@@ -54,6 +54,15 @@ class BinaryDetectionTests(unittest.TestCase):
 
 
 class CommandSafetyTests(unittest.TestCase):
+    def test_version_matches_release_file(self) -> None:
+        version_file = Path(__file__).parents[1] / "VERSION"
+        self.assertEqual(MODULE.__version__, version_file.read_text().strip())
+
+    def test_pinned_ghidra_metadata_is_consistent(self) -> None:
+        self.assertIn(MODULE.GHIDRA_VERSION, MODULE.GHIDRA_ZIP)
+        self.assertIn(MODULE.GHIDRA_ZIP, MODULE.GHIDRA_URL)
+        self.assertRegex(MODULE.GHIDRA_SHA256, r"^[0-9a-f]{64}$")
+
     def test_validates_external_identifiers(self) -> None:
         self.assertEqual(MODULE.validate_repo("owner/repo-name"), "owner/repo-name")
         self.assertEqual(MODULE.validate_script_name("Export.java"), "Export.java")

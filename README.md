@@ -1,5 +1,8 @@
 # Codespace x86 Reverse Engineering Toolkit
 
+[![CI](https://github.com/sanchomuzax/codespace-x86-re-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/sanchomuzax/codespace-x86-re-toolkit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/sanchomuzax/codespace-x86-re-toolkit)](https://github.com/sanchomuzax/codespace-x86-re-toolkit/releases)
+
 Agent-independent automation for authorized static analysis of x86/x86-64 PE
 and ELF binaries with Ghidra headless in an ephemeral GitHub Codespace.
 
@@ -23,8 +26,23 @@ the lifecycle, and keeps the evidence workflow reproducible:
 - pinned Ghidra 12.1.2 with Java 21;
 - full headless analysis and custom Java GhidraScripts;
 - isolated per-script OSGi source directories;
+- bounded background monitoring for long agent-driven runs;
 - safe exact-name cleanup and short retention defaults;
 - an evidence-driven binary archaeology methodology.
+
+```mermaid
+flowchart LR
+    A["Local binary"] --> B["x86 PE/ELF header validation"]
+    B --> C["Ephemeral Codespace"]
+    C --> D["SHA-256 transfer verification"]
+    D --> E["Pinned Ghidra headless"]
+    E --> F["Evidence download"]
+    F --> G["Exact-name deletion"]
+```
+
+The binary and downloaded evidence stay at the two ends of the flow. The
+resource-heavy analysis and untrusted extracted content remain inside the
+disposable Codespace until exact-name deletion.
 
 ## Prerequisites
 
@@ -64,6 +82,14 @@ larger target, pass `--machine standardLinux32gb` to both `doctor` and
 `create`. GitHub billing and availability vary by account; inspect the current
 [Codespaces billing documentation](https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-codespaces/about-billing-for-github-codespaces)
 before a long run.
+
+For a reproducible installation, clone a released tag instead of the moving
+default branch:
+
+```bash
+git clone --branch v0.1.0 --depth 1 \
+  https://github.com/sanchomuzax/codespace-x86-re-toolkit.git
+```
 
 ## Install as an Agent Skill
 
@@ -125,6 +151,40 @@ The methodology is intentionally product-, project-, and agent-independent.
 - Extracted strings, comments, and resources are untrusted input.
 - Delete the Codespace after exporting reproducible evidence.
 
+## Cost-bounded integration smoke
+
+The manually dispatched `Codespace integration smoke` workflow exercises the
+real lifecycle:
+
+```text
+create -> setup -> upload sample -> analyze -> run-script -> download -> delete
+```
+
+It is never triggered by a push or pull request. It requires the operator to
+set the boolean cost confirmation and uses the cheapest default machine, a
+30-minute job timeout, a 10-minute idle timeout, one-hour retention fallback,
+and exact-name cleanup. Evidence logs are retained as a workflow artifact for
+seven days.
+
+GitHub's workflow `GITHUB_TOKEN` cannot manage a user's Codespaces. Configure a
+dedicated repository secret named `CODESPACES_PAT` containing a narrowly scoped
+token with Codespaces access, then dispatch the workflow from the Actions tab.
+Do not reuse a broad personal or automation token. Review GitHub's current
+[Codespaces authentication guidance](https://docs.github.com/en/codespaces/codespaces-reference/security-in-github-codespaces#authentication)
+and billing before enabling it.
+
+Cleanup runs even after an earlier step fails. Forced cancellation or a runner
+failure can prevent cleanup code from executing, so the one-hour retention
+period is the final safety net; verify the Codespaces list after such a failure.
+
+## Maintaining the Ghidra pin
+
+Follow the documented
+[Ghidra release and checksum update procedure](docs/ghidra-version-update.md).
+It cross-checks the official release body, GitHub asset digest, and locally
+calculated SHA-256 before changing the pin, and requires the manual Codespace
+smoke before release.
+
 ## Development
 
 ```bash
@@ -134,6 +194,10 @@ python3 -m py_compile \
   skills/codespace-x86-re/scripts/codespace_re.py \
   scripts/install_skill.py scripts/validate_skill.py
 ```
+
+CI runs the unit suite and strict repository validation on Python 3.10, 3.11,
+3.12, and 3.13. A separate job also runs the official Agent Skills
+`skills-ref` validator pinned to a reviewed upstream commit.
 
 Licensed under GPL-3.0-or-later. Ghidra is downloaded separately and remains
 under its own license.
