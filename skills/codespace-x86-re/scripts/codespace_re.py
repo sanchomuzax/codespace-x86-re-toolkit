@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 DEFAULT_HOST_REPO = "sanchomuzax/codespace-x86-re-toolkit"
 DEFAULT_MACHINE = "basicLinux32gb"
 DEFAULT_LOCATION = "WestEurope"
@@ -31,6 +31,10 @@ GHIDRA_URL = (
     "https://github.com/NationalSecurityAgency/ghidra/releases/download/"
     f"Ghidra_{GHIDRA_VERSION}_build/{GHIDRA_ZIP}"
 )
+
+REA_VERSION = "6.4.0"
+REA_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+REA_GHIDRA_STARTUP_TIMEOUT_MS = 900000
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -224,6 +228,11 @@ if ! test -x "$install/support/analyzeHeadless"; then
 fi
 "$java_home/bin/java" -version
 "$install/support/analyzeHeadless" 2>&1 | head -n 3 || true
+if command -v npx >/dev/null; then
+    npx -y rea-agents@{REA_VERSION} --version
+else
+    echo "Node.js is missing; REA MCP needs a Codespace built with the node feature." >&2
+fi
 """
 
 
@@ -396,6 +405,100 @@ def delete(args: argparse.Namespace) -> None:
     )
 
 
+def select_codespace(entries: list[dict]) -> str:
+    """Return the only toolkit Codespace, preferring an available one; never guess."""
+    toolkit = [entry for entry in entries if entry.get("displayName") == DISPLAY_NAME]
+    available = [entry["name"] for entry in toolkit if entry.get("state") == "Available"]
+    names = available or [entry["name"] for entry in toolkit]
+    if len(names) != 1:
+        found = ", ".join(f"{e['name']} ({e.get('state')})" for e in toolkit) or "none"
+        raise SystemExit(
+            f"Expected exactly one {DISPLAY_NAME} Codespace, found: {found}. "
+            "Pass --codespace NAME."
+        )
+    return validate_codespace(names[0])
+
+
+def rea_mcp_script(version: str) -> str:
+    """Remote script whose stdout carries only the MCP stream.
+
+    Profile files are sourced with stdout redirected to stderr, so a banner or
+    an echo in a login profile cannot corrupt JSON-RPC.
+    """
+    if not REA_VERSION_RE.fullmatch(version):
+        raise SystemExit(f"REA version must be an exact X.Y.Z release: {version!r}")
+    return f"""
+exec 3>&1 1>&2
+test -r /etc/profile && . /etc/profile
+test -r "$HOME/.profile" && . "$HOME/.profile"
+set -euo pipefail
+root={REMOTE_ROOT!r}
+if ! test -x "$root/tools/{GHIDRA_DIR}/support/analyzeHeadless" || ! test -f "$root/java21-home"; then
+    echo "Ghidra is not installed in this Codespace; run setup first." >&2
+    exit 21
+fi
+if ! command -v npx >/dev/null; then
+    echo "Node.js is missing; recreate the Codespace from a branch with the node feature." >&2
+    exit 22
+fi
+export JAVA_HOME="$(cat "$root/java21-home")"
+export PATH="$JAVA_HOME/bin:$PATH"
+export GHIDRA_INSTALL_DIR="$root/tools/{GHIDRA_DIR}"
+export REA_GHIDRA_STARTUP_TIMEOUT_MS={REA_GHIDRA_STARTUP_TIMEOUT_MS}
+cd "$root"
+exec 1>&3 3>&-
+exec npx -y rea-agents@{version} mcp
+"""
+
+
+def rea_mcp_command(name: str, version: str) -> list[str]:
+    script = rea_mcp_script(version)
+    return [
+        gh_binary(),
+        "codespace",
+        "ssh",
+        "-c",
+        validate_codespace(name),
+        "--",
+        f"bash -c {shlex.quote(script)}",
+    ]
+
+
+def find_codespace(repo: str) -> str:
+    try:
+        listing = run(
+            [
+                gh_binary(),
+                "codespace",
+                "list",
+                "--repo",
+                validate_repo(repo),
+                "--json",
+                "name,state,displayName",
+            ],
+            capture=True,
+        )
+        entries = json.loads(listing.stdout)
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(f"Listing Codespaces failed: {(error.stderr or '').strip()}")
+    except json.JSONDecodeError:
+        raise SystemExit("gh codespace list returned invalid JSON.")
+    return select_codespace(entries)
+
+
+def rea_mcp(args: argparse.Namespace) -> None:
+    """Serve REA's MCP over stdio from the Codespace; stdout carries only MCP.
+
+    --repo is used only when --codespace is omitted.
+    """
+    name = args.codespace or find_codespace(args.repo)
+    command = rea_mcp_command(name, args.rea_version)
+    try:
+        os.execvp(command[0], command)
+    except FileNotFoundError:
+        raise SystemExit(f"GitHub CLI not found: {command[0]}")
+
+
 def add_host_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo", default=DEFAULT_HOST_REPO, help="OWNER/NAME host repo")
     parser.add_argument("--machine", default=DEFAULT_MACHINE)
@@ -457,6 +560,14 @@ def build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("--output", required=True, type=Path)
     download_parser.add_argument("--overwrite", action="store_true")
     download_parser.set_defaults(handler=download)
+
+    rea_parser = commands.add_parser(
+        "rea-mcp", help="Serve the REA MCP server from the Codespace over stdio"
+    )
+    rea_parser.add_argument("--codespace", help="exact name; default: the only available one")
+    rea_parser.add_argument("--repo", default=DEFAULT_HOST_REPO, help="OWNER/NAME host repo")
+    rea_parser.add_argument("--rea-version", default=REA_VERSION)
+    rea_parser.set_defaults(handler=rea_mcp)
     return parser
 
 

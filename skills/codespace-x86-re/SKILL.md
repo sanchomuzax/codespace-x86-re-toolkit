@@ -129,6 +129,27 @@ error.
 If that error occurs, check path isolation first, Java compilation second, and
 the OSGi cache last. Cache deletion cannot fix an incorrect scriptPath.
 
+## Serve REA over MCP from the Codespace
+
+[REA](https://github.com/morluto/rea) can use this Codespace's pinned Ghidra as
+its native analysis engine while the agent itself runs elsewhere, for example
+on an ARM machine where Ghidra's native decompiler is not available. After
+`create` and `setup`, register this stdio MCP server in the agent:
+
+```bash
+python3 skills/codespace-x86-re/scripts/codespace_re.py rea-mcp
+```
+
+It selects the only `codespace-x86-re` Codespace (preferring an available one;
+pass `--codespace NAME` when there are several), checks that Ghidra and Node.js
+are installed, and runs the pinned `rea-agents` MCP server there over
+`gh codespace ssh`. Only MCP traffic reaches stdout; profile output and
+diagnostics go to stderr. Analysis targets must be inside the Codespace, so
+pass REA the remote path, such as the uploaded `/var/tmp/codespace-x86-re/input.bin`.
+REA's Ghidra analysis is ephemeral: every new MCP session imports the target
+again. Set the client's call deadline to about 1000 seconds for large binaries,
+and delete the Codespace when the session ends.
+
 ## Preserve evidence, then clean up
 
 Record at minimum:
