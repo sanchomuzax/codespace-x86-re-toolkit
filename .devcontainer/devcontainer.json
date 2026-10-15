@@ -7,6 +7,9 @@
     },
     "ghcr.io/devcontainers/features/sshd:1": {
       "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24"
     }
   },
   "remoteUser": "vscode"
