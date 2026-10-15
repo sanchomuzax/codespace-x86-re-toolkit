@@ -15,7 +15,7 @@ import subprocess
 import sys
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 DEFAULT_HOST_REPO = "sanchomuzax/codespace-x86-re-toolkit"
 DEFAULT_MACHINE = "basicLinux32gb"
 DEFAULT_LOCATION = "WestEurope"
@@ -406,15 +406,19 @@ def delete(args: argparse.Namespace) -> None:
 
 
 def select_codespace(entries: list[dict]) -> str:
-    """Return the only toolkit Codespace, preferring an available one; never guess."""
+    """Return the only running toolkit Codespace; never guess, never wake one.
+
+    A stopped Codespace is refused on purpose: gh codespace ssh would start it,
+    and clients that launch MCP servers for every scheduled run would keep it
+    alive past its idle timeout.
+    """
     toolkit = [entry for entry in entries if entry.get("displayName") == DISPLAY_NAME]
-    available = [entry["name"] for entry in toolkit if entry.get("state") == "Available"]
-    names = available or [entry["name"] for entry in toolkit]
+    names = [entry["name"] for entry in toolkit if entry.get("state") == "Available"]
     if len(names) != 1:
         found = ", ".join(f"{e['name']} ({e.get('state')})" for e in toolkit) or "none"
         raise SystemExit(
-            f"Expected exactly one {DISPLAY_NAME} Codespace, found: {found}. "
-            "Pass --codespace NAME."
+            f"Expected exactly one running {DISPLAY_NAME} Codespace, found: {found}. "
+            "Create and set one up first, or pass --codespace NAME."
         )
     return validate_codespace(names[0])
 

@@ -140,8 +140,8 @@ on an ARM machine where Ghidra's native decompiler is not available. After
 python3 skills/codespace-x86-re/scripts/codespace_re.py rea-mcp
 ```
 
-It selects the only `codespace-x86-re` Codespace (preferring an available one;
-pass `--codespace NAME` when there are several), checks that Ghidra and Node.js
+It selects the only running `codespace-x86-re` Codespace (it never starts a
+stopped one; pass `--codespace NAME` when there are several), checks that Ghidra and Node.js
 are installed, and runs the pinned `rea-agents` MCP server there over
 `gh codespace ssh`. Only MCP traffic reaches stdout; profile output and
 diagnostics go to stderr. Analysis targets must be inside the Codespace, so

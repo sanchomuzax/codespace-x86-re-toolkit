@@ -104,9 +104,12 @@ class ReaMcpTests(unittest.TestCase):
         ]
         self.assertEqual(MODULE.select_codespace(entries), "cs-a")
 
-    def test_selects_a_single_stopped_toolkit_codespace(self) -> None:
-        # gh codespace ssh starts a stopped Codespace on connect.
-        self.assertEqual(MODULE.select_codespace([self.entry("cs-b", state="Shutdown")]), "cs-b")
+    def test_never_wakes_a_stopped_codespace(self) -> None:
+        # gh codespace ssh would start it, defeating the idle timeout when an
+        # agent framework launches MCP servers for every scheduled run.
+        with self.assertRaises(SystemExit) as raised:
+            MODULE.select_codespace([self.entry("cs-b", state="Shutdown")])
+        self.assertIn("cs-b (Shutdown)", str(raised.exception))
 
     def test_refuses_missing_or_ambiguous_codespace(self) -> None:
         for entries in ([], [self.entry("cs-a"), self.entry("cs-b")]):
